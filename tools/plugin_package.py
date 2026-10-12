@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 import sys
 from typing import Any
 from urllib.parse import urlsplit
@@ -57,25 +58,33 @@ def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _walk_json(value: Any, depth: int = 1) -> None:
-    if depth > MAX_DEPTH:
-        raise PackageError(f"JSON depth exceeds {MAX_DEPTH}")
+def _check_json_string(value: str) -> None:
+    if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+        raise PackageError("JSON contains a lone surrogate")
+
+
+def _walk_json(value: Any, depth: int = 0) -> None:
     if isinstance(value, str):
-        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
-            raise PackageError("JSON contains a lone surrogate")
+        _check_json_string(value)
     elif isinstance(value, list):
+        container_depth = depth + 1
+        if container_depth > MAX_DEPTH:
+            raise PackageError(f"JSON depth exceeds {MAX_DEPTH}")
         if len(value) > MAX_ARRAY_ITEMS:
             raise PackageError(f"JSON array exceeds {MAX_ARRAY_ITEMS} items")
         for item in value:
-            _walk_json(item, depth + 1)
+            _walk_json(item, container_depth)
     elif isinstance(value, dict):
+        container_depth = depth + 1
+        if container_depth > MAX_DEPTH:
+            raise PackageError(f"JSON depth exceeds {MAX_DEPTH}")
         if len(value) > MAX_OBJECT_MEMBERS:
             raise PackageError(f"JSON object exceeds {MAX_OBJECT_MEMBERS} members")
         for key, item in value.items():
+            _check_json_string(key)
             if key in SPECIAL_KEYS:
                 raise PackageError(f"prototype-special JSON key is forbidden: {key}")
-            _walk_json(key, depth + 1)
-            _walk_json(item, depth + 1)
+            _walk_json(item, container_depth)
 
 
 def _load_json(data: bytes, limit: int, label: str) -> Any:
@@ -195,7 +204,8 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     repository = _string(manifest["repository"], "repository", 2048)
     if not REPOSITORY_RE.fullmatch(repository):
         raise PackageError("repository must be a canonical HTTPS GitHub owner/repository URL")
-    if manifest["license"] not in LICENSES:
+    license_id = _string(manifest["license"], "license", 32)
+    if license_id not in LICENSES:
         raise PackageError("license is not in the v1 SPDX allowlist")
     _semver(manifest["minHostVersion"], "minHostVersion")
     if _semver(manifest["minHostVersion"], "minHostVersion") > HOST_VERSION:
@@ -255,50 +265,127 @@ def validate_package_bytes(data: bytes) -> dict[str, Any]:
     return package
 
 
-def read_package(path: os.PathLike[str] | str) -> tuple[bytes, dict[str, Any]]:
-    file_path = Path(path)
+_READ_FLAGS = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+
+
+def _read_regular_at(parent_fd: int, name: str, limit: int, label: str) -> bytes:
     try:
-        with file_path.open("rb") as stream:
-            data = stream.read(PACKAGE_LIMIT + 1)
+        fd = os.open(name, _READ_FLAGS, dir_fd=parent_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise PackageError(f"{label} must be a regular non-symlink file")
+            chunks: list[bytes] = []
+            remaining = limit + 1
+            while remaining:
+                chunk = os.read(fd, min(remaining, 65536))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+        finally:
+            os.close(fd)
+    except PackageError:
+        raise
     except OSError as exc:
-        raise PackageError(f"cannot read package: {exc}") from exc
+        raise PackageError(f"cannot read {label}: {exc}") from exc
+    value = b"".join(chunks)
+    if len(value) > limit:
+        raise PackageError(f"{label} exceeds {limit} UTF-8 bytes")
+    return value
+
+
+def _open_parent(path: os.PathLike[str] | str, create: bool) -> tuple[int, str, str]:
+    absolute = os.path.abspath(os.fspath(path))
+    parent, name = os.path.split(absolute)
+    if not name:
+        raise PackageError("output or package path must name a file")
+    fd = os.open(os.path.sep, _DIR_FLAGS)
+    try:
+        for component in Path(parent).parts[1:]:
+            try:
+                child = os.open(component, _DIR_FLAGS, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(component, dir_fd=fd)
+                child = os.open(component, _DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return fd, name, absolute
+    except OSError as exc:
+        os.close(fd)
+        raise PackageError(f"cannot open parent directory: {exc}") from exc
+
+
+def read_package(path: os.PathLike[str] | str) -> tuple[bytes, dict[str, Any]]:
+    parent_fd, name, _ = _open_parent(path, False)
+    try:
+        data = _read_regular_at(parent_fd, name, PACKAGE_LIMIT, "package")
+    finally:
+        os.close(parent_fd)
     return data, validate_package_bytes(data)
 
 
+def _write_new_file(path: os.PathLike[str] | str, data: bytes) -> None:
+    parent_fd, name, _ = _open_parent(path, True)
+    fd: int | None = None
+    created = False
+    try:
+        fd = os.open(
+            name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o644,
+            dir_fd=parent_fd,
+        )
+        created = True
+        view = memoryview(data)
+        while view:
+            written = os.write(fd, view)
+            if written == 0:
+                raise OSError("write returned zero bytes")
+            view = view[written:]
+        os.fsync(fd)
+    except OSError as exc:
+        if fd is not None:
+            os.close(fd)
+            fd = None
+        if created:
+            try:
+                os.unlink(name, dir_fd=parent_fd)
+            except OSError:
+                pass
+        raise PackageError(f"cannot create output package: {exc}") from exc
+    finally:
+        if fd is not None:
+            os.close(fd)
+        os.close(parent_fd)
+
+
 def pack_directory(directory: os.PathLike[str] | str, output: os.PathLike[str] | str) -> dict[str, Any]:
-    input_path = Path(directory)
-    if input_path.is_symlink():
-        raise PackageError("input must be a non-symlink directory")
-    source_dir = input_path.resolve()
-    output_path = Path(output).resolve()
-    if not source_dir.is_dir():
-        raise PackageError("input must be a non-symlink directory")
-    if output_path == source_dir or source_dir in output_path.parents:
+    source_absolute = os.path.abspath(os.fspath(directory))
+    output_absolute = os.path.abspath(os.fspath(output))
+    if os.path.commonpath((source_absolute, output_absolute)) == source_absolute:
         raise PackageError("output must be outside the input directory")
     expected = {"manifest.json", "main.js", "LICENSE"}
     try:
-        entries = {entry.name: entry for entry in source_dir.iterdir()}
+        source_fd = os.open(source_absolute, _DIR_FLAGS)
     except OSError as exc:
-        raise PackageError(f"cannot list input directory: {exc}") from exc
-    if set(entries) != expected:
-        raise PackageError("input directory must contain only manifest.json, main.js, and LICENSE")
-    for name, path in entries.items():
-        if path.is_symlink() or not path.is_file():
-            raise PackageError(f"input {name} must be a regular non-symlink file")
-
-    def bounded(path: Path, limit: int, label: str) -> bytes:
+        raise PackageError(f"input must be a non-symlink directory: {exc}") from exc
+    try:
         try:
-            with path.open("rb") as stream:
-                value = stream.read(limit + 1)
+            entries = set(os.listdir(source_fd))
         except OSError as exc:
-            raise PackageError(f"cannot read {label}: {exc}") from exc
-        if len(value) > limit:
-            raise PackageError(f"{label} exceeds {limit} UTF-8 bytes")
-        return value
+            raise PackageError(f"cannot list input directory: {exc}") from exc
+        if entries != expected:
+            raise PackageError("input directory must contain only manifest.json, main.js, and LICENSE")
+        manifest_data = _read_regular_at(source_fd, "manifest.json", MANIFEST_LIMIT, "manifest")
+        source_data = _read_regular_at(source_fd, "main.js", SOURCE_LIMIT, "source")
+        license_data = _read_regular_at(source_fd, "LICENSE", LICENSE_LIMIT, "licenseText")
+    finally:
+        os.close(source_fd)
 
-    manifest = validate_manifest(_load_json(bounded(entries["manifest.json"], MANIFEST_LIMIT, "manifest"), MANIFEST_LIMIT, "manifest"))
-    source_data = bounded(entries["main.js"], SOURCE_LIMIT, "source")
-    license_data = bounded(entries["LICENSE"], LICENSE_LIMIT, "licenseText")
+    manifest = validate_manifest(_load_json(manifest_data, MANIFEST_LIMIT, "manifest"))
     try:
         source = source_data.decode("utf-8", "strict")
         license_text = license_data.decode("utf-8", "strict")
@@ -307,11 +394,7 @@ def pack_directory(directory: os.PathLike[str] | str, output: os.PathLike[str] |
     package = {"packageVersion": 1, "manifest": manifest, "source": source, "licenseText": license_text}
     data = canonical_json(package) + b"\n"
     validate_package_bytes(data)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        output_path.write_bytes(data)
-    except OSError as exc:
-        raise PackageError(f"cannot write package: {exc}") from exc
+    _write_new_file(output_absolute, data)
     return descriptor(data, package)
 
 

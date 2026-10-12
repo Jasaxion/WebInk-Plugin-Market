@@ -11,7 +11,9 @@ python3 tools/plugin_package.py pack PATH/TO/DIRECTORY plugin.webink-plugin.json
 python3 tools/plugin_package.py verify plugin.webink-plugin.json
 ```
 
-The input directory must contain exactly three regular, non-symlink files: `manifest.json`, `main.js`, and `LICENSE`. The output must be outside that directory. No nested entries, ZIP/TAR archive, hook, dependency installation, or asset is supported. `main.js` is non-empty strict UTF-8 classic-script source data. The runtime will later check its entry point; this tool deliberately makes no JavaScript syntax or security claim.
+The input directory must contain exactly three regular, non-symlink files: `manifest.json`, `main.js`, and `LICENSE`. The output must be outside that directory and must not already exist; existing files and symlinks are never overwritten. No nested entries, ZIP/TAR archive, hook, dependency installation, or asset is supported. `main.js` is non-empty strict UTF-8 classic-script source data. The runtime will later check its entry point; this tool deliberately makes no JavaScript syntax or security claim.
+
+Filesystem safety uses POSIX directory-relative descriptors, `O_NOFOLLOW`, and regular-file `fstat` checks. The tool therefore requires Linux or another POSIX platform providing `O_DIRECTORY`, `O_NOFOLLOW`, and descriptor-relative `open`; Windows is not supported.
 
 The output is deterministic canonical JSON: keys sorted by Unicode code point, no insignificant whitespace, UTF-8 characters emitted directly, and one final LF. Both commands print JSON containing the validated manifest and an artifact descriptor with exact `bytes` and lowercase SHA-256. Artifact URLs and catalog indexes are outside this tool.
 
@@ -51,7 +53,7 @@ A manifest has exactly these fields:
 
 ## Parser and size limits
 
-All files and package strings use strict UTF-8; malformed input and lone Unicode surrogates are rejected. JSON rejects duplicate keys, trailing data, NaN/Infinity, fractional numbers, unknown fields, and prototype-special keys `__proto__`, `prototype`, and `constructor` anywhere. Maximum nesting depth is 12; every object and array has at most 100 members/items.
+All files and package strings use strict UTF-8; malformed input and lone Unicode surrogates are rejected. JSON rejects duplicate keys, trailing data, NaN/Infinity, fractional numbers, unknown fields, and prototype-special keys `__proto__`, `prototype`, and `constructor` anywhere. Maximum structural nesting depth is 12: a root container has depth 1, each nested container adds 1, and scalars/member names add no depth; a generic root scalar has depth 0. Every object and array has at most 100 members/items. This depth wording and its shared vectors correct the pre-release v1 baseline and do not introduce a new format version.
 
 Limits are read-bounded before parsing: package 512 KiB, source 256 KiB, canonical manifest 16 KiB, and license text 64 KiB. These are UTF-8 byte limits. The separate metadata lengths above count Unicode code points consistently.
 

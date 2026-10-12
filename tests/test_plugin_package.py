@@ -1,10 +1,13 @@
 import copy
 import json
 from pathlib import Path
+import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
 import plugin_package as pp
@@ -18,7 +21,7 @@ class PluginPackageTest(unittest.TestCase):
         self.manifest = json.loads((FIXTURE / "manifest.json").read_text())
 
     def package(self, manifest=None, source="globalThis.pluginMain = () => {};", license_text="license"):
-        return {"packageVersion": 1, "manifest": manifest or copy.deepcopy(self.manifest), "source": source, "licenseText": license_text}
+        return {"packageVersion": 1, "manifest": manifest if manifest is not None else copy.deepcopy(self.manifest), "source": source, "licenseText": license_text}
 
     def encoded(self, package):
         return json.dumps(package, ensure_ascii=False, separators=(",", ":")).encode()
@@ -76,13 +79,47 @@ class PluginPackageTest(unittest.TestCase):
         package = self.package()
         package["extra"] = 1
         self.rejects(package)
-        deep = '"x"'
-        for _ in range(13):
-            deep = "[" + deep + "]"
-        with self.assertRaises(pp.PackageError):
-            pp._load_json(deep.encode(), 1000, "test")
+        vector = json.loads((ROOT / "fixtures/package-v1/vectors.json").read_text())["depth"]
+        for kind in ("array", "object"):
+            pp._load_json(vector[f"{kind}12Accepted"].encode(), 1000, "test")
+            with self.assertRaises(pp.PackageError):
+                pp._load_json(vector[f"{kind}13Rejected"].encode(), 1000, "test")
+        self.assertEqual("scalar", pp._load_json(b'"scalar"', 1000, "test"))
+        pp._load_json(b'{"key":{"nested":0}}', 1000, "test")
         with self.assertRaises(pp.PackageError):
             pp._load_json(("[" + ",".join("0" for _ in range(101)) + "]").encode(), 1000, "test")
+
+    def test_all_manifest_fields_reject_hostile_types_and_cli_stays_json(self):
+        hostile = [[], {}, None, True, 7]
+        for field in self.manifest:
+            for value in hostile:
+                manifest = copy.deepcopy(self.manifest)
+                manifest[field] = [None] if field in ("permissions", "networkOrigins") and value == [] else value
+                with self.subTest(field=field, value=type(value).__name__):
+                    self.rejects(self.package(manifest))
+        for field in ("id", "title"):
+            for value in hostile:
+                manifest = copy.deepcopy(self.manifest)
+                manifest["commands"][0][field] = value
+                with self.subTest(command_field=field, value=type(value).__name__):
+                    self.rejects(self.package(manifest))
+        for field in ("packageVersion", "manifest", "source", "licenseText"):
+            package = self.package()
+            package[field] = []
+            with self.subTest(package_field=field):
+                self.rejects(package)
+        self.rejects(self.package({}))
+        with tempfile.TemporaryDirectory() as temp:
+            bad = Path(temp) / "bad.webink-plugin.json"
+            package = self.package(); package["manifest"]["license"] = []
+            bad.write_bytes(self.encoded(package))
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools/plugin_package.py"), "verify", str(bad)],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(1, result.returncode)
+            self.assertFalse(json.loads(result.stderr)["valid"])
+            self.assertNotIn("Traceback", result.stderr)
 
     def test_manifest_versions_ids_commands_and_fields(self):
         mutations = []
@@ -146,6 +183,73 @@ class PluginPackageTest(unittest.TestCase):
             directory_link.symlink_to(source, target_is_directory=True)
             with self.assertRaises(pp.PackageError): pp.pack_directory(directory_link, outside)
         self.assertFalse(sentinel.exists())
+
+    def test_existing_output_symlink_and_verify_nonregular_are_rejected_without_changes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            existing = root / "existing.webink-plugin.json"
+            existing.write_bytes(b"keep")
+            with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, existing)
+            self.assertEqual(b"keep", existing.read_bytes())
+            target = root / "target"
+            target.write_bytes(b"target")
+            link = root / "link.webink-plugin.json"
+            link.symlink_to(target)
+            with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, link)
+            self.assertEqual(b"target", target.read_bytes())
+            with self.assertRaises(pp.PackageError): pp.read_package(link)
+            fifo = root / "fifo"
+            os.mkfifo(fifo)
+            completed = []
+            thread = threading.Thread(target=lambda: completed.append(self._read_rejected(fifo)))
+            thread.start(); thread.join(1)
+            self.assertFalse(thread.is_alive(), "FIFO read blocked")
+            self.assertEqual([True], completed)
+
+    def _read_rejected(self, path):
+        try:
+            pp.read_package(path)
+        except pp.PackageError:
+            return True
+        return False
+
+    def test_controlled_swap_does_not_follow_replacement_symlink(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "source"
+            source.mkdir()
+            for name in ("manifest.json", "main.js", "LICENSE"):
+                (source / name).write_bytes((FIXTURE / name).read_bytes())
+            outside = Path(temp) / "outside"
+            outside.write_text("not source")
+            real_listdir = os.listdir
+            def swap(fd):
+                names = real_listdir(fd)
+                (source / "main.js").unlink()
+                (source / "main.js").symlink_to(outside)
+                return names
+            with mock.patch.object(pp.os, "listdir", side_effect=swap):
+                with self.assertRaises(pp.PackageError):
+                    pp.pack_directory(source, Path(temp) / "output")
+
+    def test_partial_output_cleanup_removes_only_new_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "new.webink-plugin.json"
+            real_write = os.write
+            calls = 0
+            def fail_after_write(fd, data):
+                nonlocal calls
+                calls += 1
+                if calls > 1:
+                    raise OSError("controlled failure")
+                return real_write(fd, data[:1])
+            with mock.patch.object(pp.os, "write", side_effect=fail_after_write):
+                with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, output)
+            self.assertFalse(output.exists())
+            existing = Path(temp) / "existing"
+            existing.write_bytes(b"keep")
+            with mock.patch.object(pp.os, "write", side_effect=OSError("must not run")):
+                with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, existing)
+            self.assertEqual(b"keep", existing.read_bytes())
 
     def test_oversized_manifest_and_archive_bytes_rejected(self):
         manifest = copy.deepcopy(self.manifest)
