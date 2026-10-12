@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import stat
 import sys
 from typing import Any
@@ -329,37 +330,70 @@ def read_package(path: os.PathLike[str] | str) -> tuple[bytes, dict[str, Any]]:
 
 def _write_new_file(path: os.PathLike[str] | str, data: bytes) -> None:
     parent_fd, name, _ = _open_parent(path, True)
-    fd: int | None = None
-    created = False
+    stage_dir_name: str | None = None
+    stage_dir_fd: int | None = None
+    stage_fd: int | None = None
+    published = False
     try:
-        fd = os.open(
-            name,
+        for _ in range(100):
+            candidate = f".webink-package-{secrets.token_hex(12)}"
+            try:
+                os.mkdir(candidate, 0o700, dir_fd=parent_fd)
+                stage_dir_name = candidate
+                break
+            except FileExistsError:
+                continue
+        if stage_dir_name is None:
+            raise OSError("cannot allocate private staging directory")
+        stage_dir_fd = os.open(stage_dir_name, _DIR_FLAGS, dir_fd=parent_fd)
+        stage_fd = os.open(
+            "package",
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
             0o644,
-            dir_fd=parent_fd,
+            dir_fd=stage_dir_fd,
         )
-        created = True
         view = memoryview(data)
         while view:
-            written = os.write(fd, view)
+            written = os.write(stage_fd, view)
             if written == 0:
                 raise OSError("write returned zero bytes")
             view = view[written:]
-        os.fsync(fd)
+        os.fsync(stage_fd)
+        os.close(stage_fd)
+        stage_fd = None
+        os.link(
+            "package", name,
+            src_dir_fd=stage_dir_fd, dst_dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
+        published = True
     except OSError as exc:
-        if fd is not None:
-            os.close(fd)
-            fd = None
-        if created:
+        if not published:
+            raise PackageError(f"cannot create output package: {exc}") from exc
+    finally:
+        if stage_fd is not None:
             try:
-                os.unlink(name, dir_fd=parent_fd)
+                os.close(stage_fd)
             except OSError:
                 pass
-        raise PackageError(f"cannot create output package: {exc}") from exc
-    finally:
-        if fd is not None:
-            os.close(fd)
-        os.close(parent_fd)
+        if stage_dir_fd is not None:
+            try:
+                os.unlink("package", dir_fd=stage_dir_fd)
+            except OSError:
+                pass
+            try:
+                os.close(stage_dir_fd)
+            except OSError:
+                pass
+        if stage_dir_name is not None:
+            try:
+                os.rmdir(stage_dir_name, dir_fd=parent_fd)
+            except OSError:
+                pass
+        try:
+            os.close(parent_fd)
+        except OSError:
+            pass
 
 
 def pack_directory(directory: os.PathLike[str] | str, output: os.PathLike[str] | str) -> dict[str, Any]:

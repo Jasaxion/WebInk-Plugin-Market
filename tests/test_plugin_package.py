@@ -231,7 +231,7 @@ class PluginPackageTest(unittest.TestCase):
                 with self.assertRaises(pp.PackageError):
                     pp.pack_directory(source, Path(temp) / "output")
 
-    def test_partial_output_cleanup_removes_only_new_file(self):
+    def test_stage_failure_cleans_private_context_without_touching_final_name(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "new.webink-plugin.json"
             real_write = os.write
@@ -245,11 +245,29 @@ class PluginPackageTest(unittest.TestCase):
             with mock.patch.object(pp.os, "write", side_effect=fail_after_write):
                 with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, output)
             self.assertFalse(output.exists())
+            self.assertEqual([], list(Path(temp).iterdir()))
+
+            def create_final_then_fail(fd, data):
+                output.write_bytes(b"concurrent user file")
+                raise OSError("controlled concurrent failure")
+            with mock.patch.object(pp.os, "write", side_effect=create_final_then_fail):
+                with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, output)
+            self.assertEqual(b"concurrent user file", output.read_bytes())
+            self.assertEqual([output], list(Path(temp).iterdir()))
+
             existing = Path(temp) / "existing"
             existing.write_bytes(b"keep")
             with mock.patch.object(pp.os, "write", side_effect=OSError("must not run")):
                 with self.assertRaises(pp.PackageError): pp.pack_directory(FIXTURE, existing)
             self.assertEqual(b"keep", existing.read_bytes())
+
+    def test_cleanup_failure_after_publication_reports_success_and_keeps_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "published.webink-plugin.json"
+            with mock.patch.object(pp.os, "rmdir", side_effect=OSError("controlled cleanup failure")):
+                result = pp.pack_directory(FIXTURE, output)
+            self.assertTrue(output.is_file())
+            self.assertEqual(output.stat().st_size, result["artifact"]["bytes"])
 
     def test_oversized_manifest_and_archive_bytes_rejected(self):
         manifest = copy.deepcopy(self.manifest)
