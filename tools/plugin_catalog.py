@@ -160,7 +160,13 @@ def read_catalog(path: os.PathLike[str] | str) -> tuple[bytes, dict[str, Any]]:
 
 
 def validate_artifact(release: dict[str, Any], data: bytes) -> dict[str, Any]:
-    """Match package bytes and canonical manifest to one validated release."""
+    """Validate a release, then match its exact package bytes and manifest."""
+    try:
+        validate_catalog_bytes(package_format.canonical_json({
+            "catalogVersion": 1, "sequence": 1, "releases": [release], "revocations": [],
+        }))
+    except package_format.PackageError as exc:
+        raise CatalogError(str(exc)) from exc
     artifact = release["artifact"]
     if len(data) != artifact["bytes"]:
         raise CatalogError("package byte count does not match release")

@@ -130,6 +130,19 @@ class PluginCatalogTest(unittest.TestCase):
         with self.assertRaises(pc.CatalogError): pc.validate_artifact(descriptor, other_data)
         self.assertFalse(sentinel.exists())
 
+    def test_public_artifact_boundary_validates_descriptor(self):
+        package = {"packageVersion": 1, "manifest": MANIFEST, "source": "data only", "licenseText": "license"}
+        data = pp.canonical_json(package) + b"\n"
+        good = self.release(data=data)
+        cases = [{}, [], None, {"manifest": MANIFEST, "artifact": []}]
+        for field, bad in (("bytes", "1"), ("sha256", {}), ("url", "https://other.example/package.json")):
+            altered = copy.deepcopy(good)
+            altered["artifact"][field] = bad
+            cases.append(altered)
+        for release in cases:
+            with self.subTest(release=release), self.assertRaises(pc.CatalogError):
+                pc.validate_artifact(release, data)
+
     def test_cli_verify_build_is_canonical_stable_and_never_overwrites(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
