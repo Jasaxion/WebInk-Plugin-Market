@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "jasaxion.reading-comfort",
+  "version": "0.1.0",
+  "name": "Reading comfort",
+  "description": "Apply or clear a fixed comfortable text zoom on the current page.",
+  "author": "Jasaxion",
+  "repository": "https://github.com/Jasaxion/WebInk-Plugin-Market",
+  "license": "Apache-2.0",
+  "minHostVersion": "0.9.0",
+  "apiVersion": 1,
+  "commands": [
+    {"id": "enlarge", "title": "Use 125% text zoom"},
+    {"id": "clear", "title": "Clear text zoom"}
+  ],
+  "permissions": ["page.style"],
+  "networkOrigins": []
+}
