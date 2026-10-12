@@ -121,7 +121,8 @@ def _blob(api: GitHubAPI, sha: object, limit: int) -> bytes:
     if not isinstance(value, dict) or value.get("encoding") != "base64" or not isinstance(value.get("content"), str):
         raise SubmissionError("GitHub blob response is malformed")
     try:
-        data = base64.b64decode(value["content"], validate=True)
+        encoded = value["content"].replace("\r", "").replace("\n", "")
+        data = base64.b64decode(encoded, validate=True)
     except (ValueError, UnicodeError) as exc:
         raise SubmissionError("GitHub blob encoding is malformed") from exc
     if len(data) > limit:
@@ -156,6 +157,57 @@ def _manifest(data: bytes) -> dict:
         data, plugin_package.MANIFEST_LIMIT, "manifest"))
 
 
+def _commit_tree(api: GitHubAPI, commit_sha: str, label: str) -> str:
+    commit = api.get(f"/commits/{commit_sha}")
+    try:
+        observed_commit = commit["sha"]
+        tree_sha = commit["commit"]["tree"]["sha"]
+    except (KeyError, TypeError) as exc:
+        raise SubmissionError(f"{label} commit metadata is malformed") from exc
+    if observed_commit != commit_sha:
+        raise SubmissionError(f"{label} commit SHA does not match")
+    return _sha(tree_sha, f"{label} tree SHA")
+
+
+def _submission_tree(tree: dict[str, dict]) -> dict[tuple[str, str], dict[str, dict]]:
+    folders: dict[tuple[str, str], dict[str, dict]] = {}
+    directory_paths: set[tuple[str, ...]] = set()
+    for path, entry in tree.items():
+        parts = path.split("/")
+        if parts[0] != "submissions":
+            continue
+        if entry.get("type") == "tree":
+            if entry.get("mode") != "040000" or not isinstance(entry.get("sha"), str) or not SHA_RE.fullmatch(entry["sha"]):
+                raise SubmissionError("submission directories must be mode-040000 Git trees")
+            if not 1 <= len(parts) <= 3:
+                raise SubmissionError("invalid directory beneath submissions")
+            if len(parts) >= 2 and not ID_RE.fullmatch(parts[1]):
+                raise SubmissionError("invalid plugin directory beneath submissions")
+            if len(parts) == 3 and not SEMVER_RE.fullmatch(parts[2]):
+                raise SubmissionError("invalid version directory beneath submissions")
+            directory_paths.add(tuple(parts))
+            continue
+        parsed = _submission_parts(path)
+        if parsed is None:
+            raise SubmissionError("invalid entry beneath submissions")
+        plugin_id, version, name = parsed
+        if entry.get("type") != "blob" or entry.get("mode") != "100644" or not isinstance(entry.get("sha"), str) or not SHA_RE.fullmatch(entry["sha"]):
+            raise SubmissionError("submission entries must be regular mode-0644 Git blobs")
+        folders.setdefault((plugin_id, version), {})[name] = entry
+    for plugin_id, version in folders:
+        required = {("submissions",), ("submissions", plugin_id), ("submissions", plugin_id, version)}
+        if not required <= directory_paths:
+            raise SubmissionError("submission files require their Git tree hierarchy")
+    expected_directories = {path for plugin_id, version in folders for path in (
+        ("submissions",), ("submissions", plugin_id), ("submissions", plugin_id, version))}
+    if directory_paths != expected_directories:
+        raise SubmissionError("empty or extra submission directory is forbidden")
+    for entries in folders.values():
+        if set(entries) != EXPECTED_FILES:
+            raise SubmissionError("every submission folder must contain exactly four files")
+    return folders
+
+
 def certify(api: GitHubAPI, base_sha: str, candidate_sha: str, pr_number: int, head_repository: str) -> dict:
     base_sha, candidate_sha = _sha(base_sha, "base SHA"), _sha(candidate_sha, "candidate SHA")
     if not 1 <= pr_number <= 2_147_483_647:
@@ -169,9 +221,8 @@ def certify(api: GitHubAPI, base_sha: str, candidate_sha: str, pr_number: int, h
         raise SubmissionError("pull request metadata is malformed") from exc
     if (observed_sha, observed_repo, observed_base) != (candidate_sha, head_repository, base_sha):
         raise SubmissionError("pull request head or base changed during validation")
-    commit = api.get(f"/commits/{candidate_sha}")
-    if not isinstance(commit, dict) or commit.get("sha") != candidate_sha:
-        raise SubmissionError("candidate SHA is not reachable in the official repository network")
+    base_tree_sha = _commit_tree(api, base_sha, "base")
+    candidate_tree_sha = _commit_tree(api, candidate_sha, "candidate")
 
     changes = _changed_files(api, pr_number)
     if not changes:
@@ -188,30 +239,23 @@ def certify(api: GitHubAPI, base_sha: str, candidate_sha: str, pr_number: int, h
             raise SubmissionError("existing submission data cannot be deleted or rewritten")
         touched.add(parts[:2])
 
-    base_tree, candidate_tree = _tree(api, base_sha), _tree(api, candidate_sha)
+    base_tree, candidate_tree = _tree(api, base_tree_sha), _tree(api, candidate_tree_sha)
+    base_folders = _submission_tree(base_tree)
+    candidate_folders = _submission_tree(candidate_tree)
     for path, entry in base_tree.items():
-        if path.startswith("submissions/") and candidate_tree.get(path) != entry:
+        if not path.startswith("submissions/") or entry.get("type") == "tree":
+            continue
+        candidate_entry = candidate_tree.get(path)
+        identity = lambda item: None if item is None else (item.get("mode"), item.get("type"), item.get("sha"))
+        if identity(candidate_entry) != identity(entry):
             raise SubmissionError("existing submission snapshot changed")
 
     identities: dict[str, tuple[str, str]] = {}
-    candidate_folders: dict[tuple[str, str], dict[str, dict]] = {}
-    for path, entry in candidate_tree.items():
-        if not path.startswith("submissions/"):
-            continue
-        parts = _submission_parts(path)
-        if parts is None:
-            raise SubmissionError("invalid entry beneath submissions")
-        plugin_id, version, name = parts
-        if entry.get("type") != "blob" or entry.get("mode") != "100644":
-            raise SubmissionError("submission entries must be regular mode-0644 files")
-        candidate_folders.setdefault((plugin_id, version), {})[name] = entry
     if not touched:
         raise SubmissionError("no submission folder was added")
 
     reports = []
     for folder, entries in candidate_folders.items():
-        if set(entries) != EXPECTED_FILES:
-            raise SubmissionError("every submission folder must contain exactly four files")
         manifest = _manifest(_blob(api, entries["manifest.json"].get("sha"), plugin_package.MANIFEST_LIMIT))
         plugin_id, version = folder
         if (manifest["id"], manifest["version"]) != folder:
