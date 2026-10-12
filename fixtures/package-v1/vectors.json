@@ -5,5 +5,12 @@
     "array13Rejected": "[[[[[[[[[[[[[0]]]]]]]]]]]]]",
     "object12Accepted": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":0}}}}}}}}}}}}",
     "object13Rejected": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":0}}}}}}}}}}}}}"
+  },
+  "androidBoundaryVectors": {
+    "numericIpLikeOriginRejected": "https://999.1",
+    "oversizedIntegerRejected": "9223372036854775808",
+    "integerStringRejected": "\"1\"",
+    "validSurrogatePair": "\\ud83d\\ude00",
+    "canonicalControls": "line\\n\\t\\u0001😀"
   }
 }
