@@ -140,6 +140,18 @@ class PluginPackageTest(unittest.TestCase):
         for manifest in mutations:
             with self.subTest(manifest=manifest): self.rejects(self.package(manifest))
 
+    def test_cross_client_integer_and_ip_like_origin_boundaries(self):
+        for value in (-(1 << 63), (1 << 63) - 1):
+            self.assertEqual(value, pp._load_json(str(value).encode(), 100, "number"))
+        for value in (-(1 << 63) - 1, 1 << 63):
+            with self.assertRaises(pp.PackageError):
+                pp._load_json(str(value).encode(), 100, "number")
+        for host in ("999.1", "127.1", "1.2.3.999"):
+            manifest = copy.deepcopy(self.manifest)
+            manifest["permissions"] = ["network"]
+            manifest["networkOrigins"] = ["https://" + host]
+            self.rejects(self.package(manifest))
+
     def test_permissions_and_origins(self):
         bad = [
             (["bad"], []), (["storage", "storage"], []), ([], ["https://example.com"]),

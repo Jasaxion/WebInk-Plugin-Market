@@ -50,6 +50,13 @@ def _reject_constant(value: str) -> None:
     raise PackageError(f"invalid JSON number: {value}")
 
 
+def _integer(value: str) -> int:
+    number = int(value)
+    if not -(1 << 63) <= number < (1 << 63):
+        raise PackageError("JSON integer is outside signed 64-bit range")
+    return number
+
+
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
@@ -99,6 +106,7 @@ def _load_json(data: bytes, limit: int, label: str) -> Any:
         value = json.loads(
             text,
             object_pairs_hook=_pairs,
+            parse_int=_integer,
             parse_constant=_reject_constant,
             parse_float=lambda value: (_ for _ in ()).throw(PackageError(f"non-integer JSON number: {value}")),
         )
@@ -177,7 +185,7 @@ def _validate_origin(origin: str) -> None:
         raise PackageError("network origin must be canonical HTTPS without userinfo")
     if port is not None or parsed.path or parsed.query or parsed.fragment:
         raise PackageError("network origin must be exactly https://host using default port 443")
-    if origin != f"https://{host}" or not HOST_RE.fullmatch(host) or ".." in host or "." not in host:
+    if origin != f"https://{host}" or not HOST_RE.fullmatch(host) or ".." in host or "." not in host or all(ch.isdigit() or ch == "." for ch in host):
         raise PackageError("network origin hostname is not canonical")
     labels = host.split(".")
     if any(not label or len(label) > 63 or label[0] == "-" or label[-1] == "-" for label in labels):

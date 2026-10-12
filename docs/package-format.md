@@ -49,11 +49,11 @@ A manifest has exactly these fields:
 - `license` is one of the complete v1 SPDX allowlist: `Apache-2.0`, `MIT`, `BSD-2-Clause`, `BSD-3-Clause`.
 - `commands` has 1–8 unique IDs. Each command has exactly `id` and `title`; IDs match `[a-z][a-z0-9-]{0,39}`.
 - `permissions` is a duplicate-free subset of `page.info`, `selection.read`, `storage`, `network`, `page.style`.
-- Without `network`, `networkOrigins` is empty. With it, the list has 1–4 unique exact origins. An origin is lowercase canonical `https://host`, default port 443 only, with no path (including `/`), userinfo, query, fragment, wildcard, IP literal, `localhost`, `.localhost`, or `.local`. Runtime DNS public-address checks are separate.
+- Without `network`, `networkOrigins` is empty. With it, the list has 1–4 unique exact origins. An origin is lowercase canonical `https://host`, default port 443 only, with no path (including `/`), userinfo, query, fragment, wildcard, IP literal or digit/dot-only IP-like hostname, `localhost`, `.localhost`, or `.local`. Runtime DNS public-address checks are separate.
 
 ## Parser and size limits
 
-All files and package strings use strict UTF-8; malformed input and lone Unicode surrogates are rejected. JSON rejects duplicate keys, trailing data, NaN/Infinity, fractional numbers, unknown fields, and prototype-special keys `__proto__`, `prototype`, and `constructor` anywhere. Maximum structural nesting depth is 12: a root container has depth 1, each nested container adds 1, and scalars/member names add no depth; a generic root scalar has depth 0. Every object and array has at most 100 members/items. This depth wording and its shared vectors correct the pre-release v1 baseline and do not introduce a new format version.
+All files and package strings use strict UTF-8; malformed input and lone Unicode surrogates are rejected. JSON integers must fit signed 64-bit range. JSON rejects duplicate keys, trailing data, NaN/Infinity, fractional numbers, unknown fields, and prototype-special keys `__proto__`, `prototype`, and `constructor` anywhere. Maximum structural nesting depth is 12: a root container has depth 1, each nested container adds 1, and scalars/member names add no depth; a generic root scalar has depth 0. Every object and array has at most 100 members/items. This depth wording and its shared vectors correct the pre-release v1 baseline and do not introduce a new format version.
 
 Limits are read-bounded before parsing: package 512 KiB, source 256 KiB, canonical manifest 16 KiB, and license text 64 KiB. These are UTF-8 byte limits. The separate metadata lengths above count Unicode code points consistently.
 
