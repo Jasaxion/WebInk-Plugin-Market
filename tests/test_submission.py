@@ -169,7 +169,7 @@ class SubmissionTest(unittest.TestCase):
         with self.assertRaisesRegex(cs.SubmissionError, "pagination"): self.certify(api)
         api = FakeAPI(submission()); api.changes = [{"filename": p, "status": "added"} for p in api._blob_paths(HEAD_TREE)]; api.trees[HEAD_TREE] = None
         with self.assertRaises(cs.SubmissionError): self.certify(api)
-        for tree_value in (None, {"sha": "bad"}):
+        for tree_value in (None, {"sha": "bad"}, {"sha": 1}, {"sha": []}, {"sha": {}}):
             api = FakeAPI(submission())
             api.commits[HEAD]["commit"]["tree"] = tree_value
             with self.subTest(tree=tree_value), self.assertRaises(cs.SubmissionError): self.certify(api)

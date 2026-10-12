@@ -81,8 +81,8 @@ class GitHubAPI:
             raise SubmissionError("GitHub API returned malformed JSON") from exc
 
 
-def _sha(value: str, label: str) -> str:
-    if not SHA_RE.fullmatch(value):
+def _sha(value: object, label: str) -> str:
+    if not isinstance(value, str) or not SHA_RE.fullmatch(value):
         raise SubmissionError(f"invalid {label}")
     return value
 
