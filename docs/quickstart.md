@@ -1,6 +1,6 @@
 # Author quickstart
 
-> WebInk 0.9 candidate host distribution is queued, not published. These files define the author contract and test examples; they do not prove execution by a distributed host.
+> WebInk 0.9 candidate host distribution is queued, not published. These files are a candidate author API packet and trusted test examples; they do not prove method, permission or error behavior in a distributed host.
 
 Create a directory containing exactly `manifest.json`, `main.js` and `LICENSE`. Start from one of [`examples/`](../examples/), then choose a unique namespaced ID, accurate author/repository/license metadata, commands, and only the permissions used. `main.js` defines `globalThis.pluginMain` as documented in the [API](api.md). Do not put a README or any other file inside the package directory.
 

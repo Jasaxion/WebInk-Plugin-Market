@@ -108,6 +108,9 @@ function checkResult(result) {
   checkResult(result);
   assert.equal(result.text, "Mock definition");
   assert.match(mock.calls[1][1], /titles=ice%20cream%2F%E9%9B%AA$/);
+  const boundary = mockApi(manifest.permissions, { selection: "a".repeat(99) + "😀tail" });
+  checkResult(await main("lookup", boundary.api));
+  assert.ok(boundary.calls[1][1].endsWith("titles=" + encodeURIComponent("a".repeat(99) + "😀")));
   const long = mockApi(manifest.permissions, {
     selection: "term",
     networkResponse: { status: 200, text: JSON.stringify({ query: { pages: { 1: { extract: "😀".repeat(3000) } } } }) },

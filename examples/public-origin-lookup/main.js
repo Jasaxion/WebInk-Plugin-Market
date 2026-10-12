@@ -1,7 +1,7 @@
 globalThis.pluginMain = async (commandId, api) => {
   if (commandId !== "lookup") throw new Error("Unsupported command");
   const { text } = await api.selection.read();
-  const term = text.trim().slice(0, 100);
+  const term = Array.from(text.trim()).slice(0, 100).join("");
   if (!term) return { text: "Select a term to look up." };
   const url = "https://en.wiktionary.org/w/api.php?action=query&format=json&origin=*&prop=extracts&exintro=1&explaintext=1&redirects=1&titles=" + encodeURIComponent(term);
   const response = await api.network.get(url);

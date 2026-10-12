@@ -1,4 +1,4 @@
-/** WebInk plugin author API, API version 1. */
+/** Candidate WebInk author API v1; real-host integration/black-box acceptance is pending. */
 export type PageKind = "online" | "snapshot" | "reader";
 export type TextZoom = 100 | 125 | 150;
 
@@ -33,6 +33,7 @@ export interface WebInkAPI {
     clearStyle(): Promise<void>;
   };
   readonly selection: {
+    /** Returns the snapshot captured on the user's command invocation, not a new page read. */
     read(): Promise<{ text: string }>;
   };
   readonly storage: {

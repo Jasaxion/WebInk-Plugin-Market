@@ -1,4 +1,6 @@
-# WebInk plugin author API v1
+# WebInk plugin author API v1 — candidate packet
+
+These declarations describe the intended API for the 0.9 candidate. A distributed host and public-only black-box validation are not yet available; this page is not evidence that the methods, permission UI or failure paths have passed real-host integration.
 
 WebInk plugins are classic JavaScript scripts. They define one asynchronous global entry point:
 
@@ -17,7 +19,7 @@ The declaration file is [`sdk/webink.d.ts`](../sdk/webink.d.ts). A command must 
 | Method | Result | Permission and limits |
 | --- | --- | --- |
 | `api.page.info()` | `{url,title,kind}`; kind is `online`, `snapshot` or `reader` | `page.info`; URL is source metadata, not an identity proof, and exposes no private local path |
-| `api.selection.read()` | `{text}` | `selection.read`; top-level ordinary selection captured when called, at most 8 KiB; no forms, iframe or HTML data; oversize fails rather than truncates |
+| `api.selection.read()` | `{text}` | `selection.read`; the same top-level ordinary selection snapshot captured when the user invokes the command; delayed calls do not reread it, at most 8 KiB; no forms, iframe or HTML data; oversize fails rather than truncates |
 | `api.storage.get(key)` | JSON value or `null` | `storage` |
 | `api.storage.set(key,value)` | `undefined` | `storage`; staged until command success |
 | `api.storage.remove(key)` | `undefined` | `storage`; staged until command success |
@@ -31,7 +33,7 @@ Network origins in a manifest are exact lowercase HTTPS origins such as `https:/
 
 ## Failures
 
-API calls reject with a typed error whose `code` is one of:
+The candidate contract requires ordinary permission, network and storage refusals to reject the individual Promise with a typed error. Revocation, lost document context, cancellation, invocation timeout, invalid protocol or resource exhaustion terminates the whole invocation and discards staged effects. The actual host must pass these paths before SDK acceptance. Error `code` values are:
 
 `INVALID_PACKAGE`, `INCOMPATIBLE`, `PERMISSION_DENIED`, `CONTEXT_GONE`, `REVOKED`, `BUSY`, `LIMIT_EXCEEDED`, `NETWORK_DENIED`, `NETWORK`, `TLS`, `TIMEOUT`, `CANCELLED`, `PLUGIN_ERROR`, `STORAGE`, `RUNTIME_UNAVAILABLE`.
 
