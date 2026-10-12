@@ -1,0 +1,16 @@
+{
+  "canonicalManifest": "{\"apiVersion\":1,\"author\":\"WebInk test fixture\",\"commands\":[{\"id\":\"noop\",\"title\":\"No operation\"}],\"description\":\"A test-only package fixture; this is not a product plugin or SDK example.\",\"id\":\"example.data-only\",\"license\":\"Apache-2.0\",\"manifestVersion\":1,\"minHostVersion\":\"0.9.0\",\"name\":\"Data-only packaging example\",\"networkOrigins\":[],\"permissions\":[],\"repository\":\"https://github.com/Jasaxion/WebInk-Plugin-Market\",\"version\":\"0.1.0\"}",
+  "depth": {
+    "array12Accepted": "[[[[[[[[[[[[0]]]]]]]]]]]]",
+    "array13Rejected": "[[[[[[[[[[[[[0]]]]]]]]]]]]]",
+    "object12Accepted": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":0}}}}}}}}}}}}",
+    "object13Rejected": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":0}}}}}}}}}}}}}"
+  },
+  "androidBoundaryVectors": {
+    "numericIpLikeOriginRejected": "https://999.1",
+    "oversizedIntegerRejected": "9223372036854775808",
+    "integerStringRejected": "\"1\"",
+    "validSurrogatePair": "\\ud83d\\ude00",
+    "canonicalControls": "line\\n\\t\\u0001😀"
+  }
+}

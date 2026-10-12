@@ -1,0 +1,17 @@
+{
+  "manifestVersion": 1,
+  "id": "example.data-only",
+  "version": "0.1.0",
+  "name": "Data-only packaging example",
+  "description": "A test-only package fixture; this is not a product plugin or SDK example.",
+  "author": "WebInk test fixture",
+  "repository": "https://github.com/Jasaxion/WebInk-Plugin-Market",
+  "license": "Apache-2.0",
+  "minHostVersion": "0.9.0",
+  "apiVersion": 1,
+  "commands": [
+    {"id": "noop", "title": "No operation"}
+  ],
+  "permissions": [],
+  "networkOrigins": []
+}

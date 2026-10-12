@@ -1,0 +1,13 @@
+{
+  "accepted": [
+    {"name": "initial-empty", "json": "{\"catalogVersion\":1,\"sequence\":1,\"releases\":[],\"revocations\":[]}"},
+    {"name": "maximum-sequence", "json": "{\"catalogVersion\":1,\"sequence\":9007199254740991,\"releases\":[],\"revocations\":[]}\n"}
+  ],
+  "rejected": [
+    {"name": "duplicate-sequence", "json": "{\"catalogVersion\":1,\"sequence\":1,\"sequence\":2,\"releases\":[],\"revocations\":[]}"},
+    {"name": "unknown-date", "json": "{\"catalogVersion\":1,\"sequence\":1,\"releases\":[],\"revocations\":[],\"date\":\"2025-01-01\"}"},
+    {"name": "unsafe-sequence", "json": "{\"catalogVersion\":1,\"sequence\":9007199254740992,\"releases\":[],\"revocations\":[]}"},
+    {"name": "fractional-sequence", "json": "{\"catalogVersion\":1,\"sequence\":1.0,\"releases\":[],\"revocations\":[]}"},
+    {"name": "lone-surrogate", "json": "{\"catalogVersion\":1,\"sequence\":1,\"releases\":[],\"revocations\":[],\"x\":\"\\ud800\"}"}
+  ]
+}
