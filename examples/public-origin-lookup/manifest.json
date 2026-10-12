@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "jasaxion.public-origin-lookup",
+  "version": "0.1.0",
+  "name": "Public origin lookup",
+  "description": "Look up the selected term in the English Wiktionary API.",
+  "author": "Jasaxion",
+  "repository": "https://github.com/Jasaxion/WebInk-Plugin-Market",
+  "license": "Apache-2.0",
+  "minHostVersion": "0.9.0",
+  "apiVersion": 1,
+  "commands": [{"id": "lookup", "title": "Look up selection"}],
+  "permissions": ["selection.read", "network"],
+  "networkOrigins": ["https://en.wiktionary.org"]
+}

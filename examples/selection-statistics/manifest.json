@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "jasaxion.selection-statistics",
+  "version": "0.1.0",
+  "name": "Selection statistics",
+  "description": "Count Unicode characters and words in the selected text.",
+  "author": "Jasaxion",
+  "repository": "https://github.com/Jasaxion/WebInk-Plugin-Market",
+  "license": "Apache-2.0",
+  "minHostVersion": "0.9.0",
+  "apiVersion": 1,
+  "commands": [{"id": "count", "title": "Count selection"}],
+  "permissions": ["selection.read"],
+  "networkOrigins": []
+}

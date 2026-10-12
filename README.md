@@ -1,4 +1,8 @@
 # WebInk-Plugin-Market
 Plugin Market for WebInk reader and annotation
 
-See [plugin package format v1](docs/package-format.md) and [public catalog data format v1](docs/catalog-format.md) for the standalone offline data contracts and Python tools. A runtime, SDK, downloader, and catalog client are not implemented here.
+Authoring: [quickstart](docs/quickstart.md) · [API v1](docs/api.md) · [permissions](docs/permissions.md) · [examples](examples) · [TypeScript declarations](sdk/webink.d.ts)
+
+Data formats: [plugin packages](docs/package-format.md) · [public catalog](docs/catalog-format.md)
+
+The WebInk 0.9 candidate host distribution is queued, not published. Repository mocks are not real-host execution proof.
